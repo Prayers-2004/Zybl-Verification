@@ -9,11 +9,18 @@ const FaceDetection = () => {
     left: false,
     right: false
   });
+  const headVerificationRef = useRef({
+    left: false,
+    right: false
+  });
+  const [currentHeadTilt, setCurrentHeadTilt] = useState(0);
   const [verificationComplete, setVerificationComplete] = useState(false);
   const [eyesClosed, setEyesClosed] = useState(false);
   const [message, setMessage] = useState('Please blink twice (0/2)');
   const [lastBlinkTime, setLastBlinkTime] = useState(0);
-  const [blinkStatus, setBlinkStatus] = useState('EYES OPEN');  const blinkCooldown = 1000; // Reduced cooldown for better responsiveness
+  const [blinkStatus, setBlinkStatus] = useState('EYES OPEN');
+  const [debugInfo, setDebugInfo] = useState('');
+  const blinkCooldown = 1000; // Reduced cooldown for better responsiveness
   const blinkDoneRef = useRef(false);
 
   useEffect(() => {
@@ -114,43 +121,71 @@ const FaceDetection = () => {
         if ((blinkCount === 2 || blinkDoneRef.current) && !verificationComplete) {
           const jawCenter = jawOutline[8];
           const noseTop = nose[0];
+          const leftEye = landmarks.getLeftEye();
+          const rightEye = landmarks.getRightEye();
 
           // Validate landmarks exist
-          if (!jawCenter || !noseTop) {
+          if (!jawCenter || !noseTop || !leftEye || !rightEye) {
             console.log('Face landmarks not detected clearly');
             return;
           }
 
-          const headTilt = (noseTop.x - jawCenter.x) / video.width;
+          // Calculate head tilt using eye positions for more accurate detection
+          const leftEyeCenter = {
+            x: leftEye.reduce((sum, point) => sum + point.x, 0) / leftEye.length,
+            y: leftEye.reduce((sum, point) => sum + point.y, 0) / leftEye.length
+          };
+          const rightEyeCenter = {
+            x: rightEye.reduce((sum, point) => sum + point.x, 0) / rightEye.length,
+            y: rightEye.reduce((sum, point) => sum + point.y, 0) / rightEye.length
+          };
+
+          // Calculate the angle between eyes and horizontal line
+          const eyeAngle = Math.atan2(rightEyeCenter.y - leftEyeCenter.y, rightEyeCenter.x - leftEyeCenter.x);
+          const headTilt = Math.sin(eyeAngle);
+          
+          // Update current head tilt state and debug info
+          setCurrentHeadTilt(headTilt);
+          setDebugInfo(`Tilt: ${headTilt.toFixed(3)} | Left: ${headVerificationRef.current.left} | Right: ${headVerificationRef.current.right}`);
 
           // Debug: show head tilt value on canvas and log to console
           context.font = '16px Arial';
           context.fillStyle = '#000000';
           context.fillText(`Head Tilt: ${headTilt.toFixed(3)}`, 10, canvas.height - 80);
-          console.log('Head Tilt:', headTilt, 'States:', { left: headVerification.left, right: headVerification.right });
+          context.fillText(`Debug: ${debugInfo}`, 10, canvas.height - 60);
+          console.log('Head Tilt:', headTilt, 'States:', headVerificationRef.current);
 
           // Check for left tilt first
-          if (!headVerification.left && headTilt < -0.010) {
+          if (!headVerificationRef.current.left && headTilt < -0.10) {
             console.log('Left tilt detected:', headTilt);
+            headVerificationRef.current.left = true;
             setHeadVerification(prev => ({ ...prev, left: true }));
             setMessage('Great! Now turn your head right');
           }
           
           // Only check for right tilt after left is verified
-          if (headVerification.left && !headVerification.right) {
+          if (headVerificationRef.current.left && !headVerificationRef.current.right) {
             console.log('Checking right tilt, current tilt:', headTilt);
-            if (headTilt > 0.010) {
+            if (headTilt > 0.10) {
               console.log('Right tilt detected:', headTilt);
-              setMessage('Verification complete! All steps passed successfully.');
-              // Update states in order
+              headVerificationRef.current.right = true;
               setHeadVerification(prev => ({ ...prev, right: true }));
+              setMessage('Verification complete! All steps passed successfully.');
               setVerificationComplete(true);
+            } else {
+              const tiltMessage = `Turn your head right (Current tilt: ${headTilt.toFixed(3)})`;
+              console.log(tiltMessage);
+              setMessage(tiltMessage);
             }
           }
-        }        // Draw status text
+        }        // Draw status text with more detailed information
         context.font = '24px Arial';
         context.fillStyle = '#000000';
         context.fillText(message, 10, 30);
+        context.font = '16px Arial';
+        context.fillText(`Current Tilt: ${currentHeadTilt.toFixed(3)}`, 10, 60);
+        context.fillText(`Left Verified: ${headVerificationRef.current.left}`, 10, 90);
+        context.fillText(`Right Verified: ${headVerificationRef.current.right}`, 10, 120);
       }
     }, 100);
 
