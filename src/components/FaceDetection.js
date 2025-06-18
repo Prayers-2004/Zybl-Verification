@@ -1,9 +1,11 @@
 import React, { useEffect, useRef, useState } from 'react';
 import * as faceapi from 'face-api.js';
+import { generateFaceVector, encryptFaceVector, storeFaceVector, checkExistingFaceVector } from '../utils/faceVerification';
 
-const FaceDetection = () => {
+const FaceDetection = ({ walletAddress, onVerificationComplete }) => {
   const videoRef = useRef();
-  const canvasRef = useRef();  const [blinkCount, setBlinkCount] = useState(0);
+  const canvasRef = useRef();
+  const [blinkCount, setBlinkCount] = useState(0);
   const [currentEAR, setCurrentEAR] = useState(0);
   const [headVerification, setHeadVerification] = useState({
     left: false,
@@ -20,9 +22,14 @@ const FaceDetection = () => {
   const [lastBlinkTime, setLastBlinkTime] = useState(0);
   const [blinkStatus, setBlinkStatus] = useState('EYES OPEN');
   const [debugInfo, setDebugInfo] = useState('');
-  const blinkCooldown = 1000; // Reduced cooldown for better responsiveness
+  const blinkCooldown = 1000;
   const blinkDoneRef = useRef(false);
+  const [isCheckingExisting, setIsCheckingExisting] = useState(false);
+  const [verificationError, setVerificationError] = useState(null);
+  const detectionIntervalRef = useRef(null);
+  const [videoDimensions, setVideoDimensions] = useState({ width: 720, height: 560 });
 
+  // Load models and start video
   useEffect(() => {
     const loadModels = async () => {
       try {
@@ -39,176 +46,220 @@ const FaceDetection = () => {
     };
 
     loadModels();
+
+    return () => {
+      if (detectionIntervalRef.current) {
+        clearInterval(detectionIntervalRef.current);
+      }
+    };
   }, []);
 
+  // Handle video stream
   const startVideo = () => {
-    navigator.mediaDevices.getUserMedia({ video: {} })
+    navigator.mediaDevices.getUserMedia({ 
+      video: { 
+        width: { ideal: videoDimensions.width },
+        height: { ideal: videoDimensions.height }
+      } 
+    })
       .then(stream => {
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
+          // Ensure video starts playing
+          videoRef.current.play().catch(err => {
+            console.error('Error playing video:', err);
+          });
         }
       })
-      .catch(err => console.error('Error accessing webcam:', err));
+      .catch(err => {
+        console.error('Error accessing webcam:', err);
+        setVerificationError('Error accessing webcam. Please ensure you have granted camera permissions.');
+      });
   };
 
-  const handleVideoPlay = () => {
-    const canvas = canvasRef.current;
+  // Setup face detection
+  useEffect(() => {
+    if (!videoRef.current || !canvasRef.current) return;
+
     const video = videoRef.current;
+    const canvas = canvasRef.current;
 
-    if (!canvas || !video) return;
+    const handleVideoPlay = () => {
+      console.log('Video started playing');
+      canvas.width = videoDimensions.width;
+      canvas.height = videoDimensions.height;
+    };
 
-    canvas.width = video.width;
-    canvas.height = video.height;
+    video.addEventListener('play', handleVideoPlay);
+    video.addEventListener('loadedmetadata', () => {
+      console.log('Video metadata loaded');
+      video.play().catch(err => {
+        console.error('Error playing video after metadata loaded:', err);
+      });
+    });
 
-    const displaySize = { width: video.width, height: video.height };
-    faceapi.matchDimensions(canvas, displaySize);    const interval = setInterval(async () => {
-      if (!video || !canvas) return;
+    const detectFaces = async () => {
+      if (!video || !canvas || video.readyState !== 4) {
+        console.log('Video not ready:', video?.readyState);
+        return;
+      }
 
-      const detections = await faceapi.detectAllFaces(video, new faceapi.TinyFaceDetectorOptions())
-        .withFaceLandmarks()
-        .withFaceExpressions();
+      try {
+        const detections = await faceapi.detectAllFaces(video, new faceapi.TinyFaceDetectorOptions())
+          .withFaceLandmarks()
+          .withFaceExpressions();
 
-      const resizedDetections = faceapi.resizeResults(detections, displaySize);
-      const context = canvas.getContext('2d');
-      context.clearRect(0, 0, canvas.width, canvas.height);
-      
-      faceapi.draw.drawDetections(canvas, resizedDetections);
-      faceapi.draw.drawFaceLandmarks(canvas, resizedDetections);
-      faceapi.draw.drawFaceExpressions(canvas, resizedDetections);
+        const resizedDetections = faceapi.resizeResults(detections, {
+          width: videoDimensions.width,
+          height: videoDimensions.height
+        });
 
-      if (detections && detections.length > 0) {        // Get landmarks for the first face
-        const landmarks = detections[0].landmarks;
-        const leftEye = landmarks.getLeftEye();
-        const rightEye = landmarks.getRightEye();
-        const nose = landmarks.getNose();
-        const jawOutline = landmarks.getJawOutline();        // Calculate EAR for both eyes
-        const leftEAR = calculateEAR(leftEye);
-        const rightEAR = calculateEAR(rightEye);
-        const averageEAR = (leftEAR + rightEAR) / 2.0;
+        const context = canvas.getContext('2d');
+        context.clearRect(0, 0, canvas.width, canvas.height);
         
-        setCurrentEAR(averageEAR);
-        const isBlinking = averageEAR < 0.280;
-        
-        // Update blink status immediately
-        setBlinkStatus(isBlinking ? 'BLINK DETECTED' : 'EYES OPEN');        // Debug information
-        context.font = '16px Arial';
-        context.fillStyle = '#000000';
-        context.fillText(`Current EAR: ${averageEAR.toFixed(3)} (Threshold: 0.290)`, 10, canvas.height - 60);
-        context.fillText(`Left Eye: ${leftEAR.toFixed(3)} | Right Eye: ${rightEAR.toFixed(3)}`, 10, canvas.height - 40);
-        context.fillText(`Status: ${averageEAR < 0.290 ? 'BLINK DETECTED' : 'EYES OPEN'}`, 10, canvas.height - 20);
-          const currentTime = Date.now();          // Blink detection with immediate counter update
-          if (averageEAR < 0.290 && !eyesClosed && currentTime - lastBlinkTime > blinkCooldown) {
+        faceapi.draw.drawDetections(canvas, resizedDetections);
+        faceapi.draw.drawFaceLandmarks(canvas, resizedDetections);
+        faceapi.draw.drawFaceExpressions(canvas, resizedDetections);
+
+        if (detections && detections.length > 0) {
+          const landmarks = detections[0].landmarks;
+          const leftEye = landmarks.getLeftEye();
+          const rightEye = landmarks.getRightEye();
+          const nose = landmarks.getNose();
+          const jawOutline = landmarks.getJawOutline();
+
+          const leftEAR = calculateEAR(leftEye);
+          const rightEAR = calculateEAR(rightEye);
+          const averageEAR = (leftEAR + rightEAR) / 2.0;
+          
+          if (Math.abs(currentEAR - averageEAR) > 0.01) {
+            setCurrentEAR(averageEAR);
+          }
+
+          const isBlinking = averageEAR < 0.280;
+          const currentTime = Date.now();
+          
+          if (isBlinking !== (blinkStatus === 'BLINK DETECTED')) {
+            setBlinkStatus(isBlinking ? 'BLINK DETECTED' : 'EYES OPEN');
+          }
+
+          // Debug information
+          context.font = '16px Arial';
+          context.fillStyle = '#000000';
+          context.fillText(`Current EAR: ${averageEAR.toFixed(3)} (Threshold: 0.290)`, 10, canvas.height - 60);
+          context.fillText(`Left Eye: ${leftEAR.toFixed(3)} | Right Eye: ${rightEAR.toFixed(3)}`, 10, canvas.height - 40);
+          context.fillText(`Status: ${isBlinking ? 'BLINK DETECTED' : 'EYES OPEN'}`, 10, canvas.height - 20);
+
+          // Blink detection
+          if (isBlinking && !eyesClosed && currentTime - lastBlinkTime > blinkCooldown) {
             setEyesClosed(true);
             setLastBlinkTime(currentTime);
             setBlinkCount(prevCount => {
-              if (prevCount < 2) {
-                const newCount = prevCount + 1;
-                if (newCount === 2) {
-                  setMessage('Blink verification complete! Now turn your head left');
-                  blinkDoneRef.current = true;
-                } else {
-                  setMessage(`Please blink twice (${newCount}/2)`);
-                }
-                return newCount;
+              const newCount = Math.min(prevCount + 1, 2);
+              if (newCount === 2) {
+                setMessage('Blink verification complete! Now turn your head left');
+                blinkDoneRef.current = true;
+              } else {
+                setMessage(`Please blink twice (${newCount}/2)`);
               }
-              return prevCount;
+              return newCount;
             });
-          } else if (averageEAR >= 0.290 && eyesClosed) {
+          } else if (!isBlinking && eyesClosed) {
             setEyesClosed(false);
           }
 
-        // Head movement detection (after blink verification)
-        if ((blinkCount === 2 || blinkDoneRef.current) && !verificationComplete) {
-          const jawCenter = jawOutline[8];
-          const noseTop = nose[0];
-          const leftEye = landmarks.getLeftEye();
-          const rightEye = landmarks.getRightEye();
+          // Head movement detection
+          if ((blinkCount === 2 || blinkDoneRef.current) && !verificationComplete) {
+            const jawCenter = jawOutline[8];
+            const noseTop = nose[0];
 
-          // Validate landmarks exist
-          if (!jawCenter || !noseTop || !leftEye || !rightEye) {
-            console.log('Face landmarks not detected clearly');
-            return;
-          }
+            if (!jawCenter || !noseTop || !leftEye || !rightEye) {
+              return;
+            }
 
-          // Calculate head tilt using eye positions for more accurate detection
-          const leftEyeCenter = {
-            x: leftEye.reduce((sum, point) => sum + point.x, 0) / leftEye.length,
-            y: leftEye.reduce((sum, point) => sum + point.y, 0) / leftEye.length
-          };
-          const rightEyeCenter = {
-            x: rightEye.reduce((sum, point) => sum + point.x, 0) / rightEye.length,
-            y: rightEye.reduce((sum, point) => sum + point.y, 0) / rightEye.length
-          };
+            const leftEyeCenter = {
+              x: leftEye.reduce((sum, point) => sum + point.x, 0) / leftEye.length,
+              y: leftEye.reduce((sum, point) => sum + point.y, 0) / leftEye.length
+            };
+            const rightEyeCenter = {
+              x: rightEye.reduce((sum, point) => sum + point.x, 0) / rightEye.length,
+              y: rightEye.reduce((sum, point) => sum + point.y, 0) / rightEye.length
+            };
 
-          // Calculate the angle between eyes and horizontal line
-          const eyeAngle = Math.atan2(rightEyeCenter.y - leftEyeCenter.y, rightEyeCenter.x - leftEyeCenter.x);
-          const headTilt = Math.sin(eyeAngle);
-          
-          // Update current head tilt state and debug info
-          setCurrentHeadTilt(headTilt);
-          setDebugInfo(`Tilt: ${headTilt.toFixed(3)} | Left: ${headVerificationRef.current.left} | Right: ${headVerificationRef.current.right}`);
+            const eyeAngle = Math.atan2(rightEyeCenter.y - leftEyeCenter.y, rightEyeCenter.x - leftEyeCenter.x);
+            const headTilt = Math.sin(eyeAngle);
+            
+            if (Math.abs(currentHeadTilt - headTilt) > 0.01) {
+              setCurrentHeadTilt(headTilt);
+            }
 
-          // Debug: show head tilt value on canvas and log to console
-          context.font = '16px Arial';
-          context.fillStyle = '#000000';
-          context.fillText(`Head Tilt: ${headTilt.toFixed(3)}`, 10, canvas.height - 80);
-          context.fillText(`Debug: ${debugInfo}`, 10, canvas.height - 60);
-          console.log('Head Tilt:', headTilt, 'States:', headVerificationRef.current);
+            const newDebugInfo = `Tilt: ${headTilt.toFixed(3)} | Left: ${headVerificationRef.current.left} | Right: ${headVerificationRef.current.right}`;
+            if (newDebugInfo !== debugInfo) {
+              setDebugInfo(newDebugInfo);
+            }
 
-          // Check for left tilt first
-          if (!headVerificationRef.current.left && headTilt < -0.10) {
-            console.log('Left tilt detected:', headTilt);
-            headVerificationRef.current.left = true;
-            setHeadVerification(prev => ({ ...prev, left: true }));
-            setMessage('Great! Now turn your head right');
-          }
-          
-          // Only check for right tilt after left is verified
-          if (headVerificationRef.current.left && !headVerificationRef.current.right) {
-            console.log('Checking right tilt, current tilt:', headTilt);
-            if (headTilt > 0.10) {
-              console.log('Right tilt detected:', headTilt);
+            context.font = '16px Arial';
+            context.fillStyle = '#000000';
+            context.fillText(`Head Tilt: ${headTilt.toFixed(3)}`, 10, canvas.height - 80);
+            context.fillText(`Debug: ${newDebugInfo}`, 10, canvas.height - 60);
+
+            if (!headVerificationRef.current.left && headTilt < -0.10) {
+              headVerificationRef.current.left = true;
+              setHeadVerification(prev => ({ ...prev, left: true }));
+              setMessage('Great! Now turn your head right');
+            }
+            
+            if (headVerificationRef.current.left && !headVerificationRef.current.right && headTilt > 0.10) {
               headVerificationRef.current.right = true;
               setHeadVerification(prev => ({ ...prev, right: true }));
-              setMessage('Verification complete! All steps passed successfully.');
+              setMessage('Verification complete! Storing face data...');
               setVerificationComplete(true);
-            } else {
-              const tiltMessage = `Turn your head right (Current tilt: ${headTilt.toFixed(3)})`;
-              console.log(tiltMessage);
-              setMessage(tiltMessage);
+              
+              // Call handleVerificationComplete when verification is done
+              handleVerificationComplete();
+            } else if (headVerificationRef.current.left && !headVerificationRef.current.right) {
+              setMessage(`Turn your head right (Current tilt: ${headTilt.toFixed(3)})`);
             }
           }
-        }        // Draw status text with more detailed information
-        context.font = '24px Arial';
-        context.fillStyle = '#000000';
-        context.fillText(message, 10, 30);
-        context.font = '16px Arial';
-        context.fillText(`Current Tilt: ${currentHeadTilt.toFixed(3)}`, 10, 60);
-        context.fillText(`Left Verified: ${headVerificationRef.current.left}`, 10, 90);
-        context.fillText(`Right Verified: ${headVerificationRef.current.right}`, 10, 120);
-      }
-    }, 100);
 
-    return () => clearInterval(interval);
-  };  const calculateEAR = (eye) => {
+          // Draw status text
+          context.font = '24px Arial';
+          context.fillStyle = '#000000';
+          context.fillText(message, 10, 30);
+          context.font = '16px Arial';
+          context.fillText(`Current Tilt: ${currentHeadTilt.toFixed(3)}`, 10, 60);
+          context.fillText(`Left Verified: ${headVerificationRef.current.left}`, 10, 90);
+          context.fillText(`Right Verified: ${headVerificationRef.current.right}`, 10, 120);
+        }
+      } catch (error) {
+        console.error('Error in face detection:', error);
+      }
+    };
+
+    detectionIntervalRef.current = setInterval(detectFaces, 100);
+
+    return () => {
+      if (detectionIntervalRef.current) {
+        clearInterval(detectionIntervalRef.current);
+      }
+      video.removeEventListener('play', handleVideoPlay);
+      video.removeEventListener('loadedmetadata', () => {});
+    };
+  }, [currentEAR, blinkStatus, eyesClosed, lastBlinkTime, blinkCount, verificationComplete, debugInfo, message, videoDimensions]);
+
+  const calculateEAR = (eye) => {
     try {
-      // Vertical distances
       const p2_p6 = euclideanDistance(eye[1], eye[5]);
       const p3_p5 = euclideanDistance(eye[2], eye[4]);
-      
-      // Horizontal distance
       const p1_p4 = euclideanDistance(eye[0], eye[3]);
       
-      if (p1_p4 === 0) return 0.35; // Return default open eye value if horizontal distance is 0
+      if (p1_p4 === 0) return 0.35;
       
-      // Calculate EAR with additional vertical point averaging
       const ear = (p2_p6 + p3_p5) / (2.0 * p1_p4);
-      
-      // Clamp the EAR value to reasonable ranges
       return Math.min(Math.max(ear, 0.1), 0.45);
     } catch (error) {
       console.error('Error calculating EAR:', error);
-      return 0.35; // Return default open eye value on error
+      return 0.35;
     }
   };
 
@@ -217,82 +268,124 @@ const FaceDetection = () => {
       Math.pow(point2.x - point1.x, 2) + 
       Math.pow(point2.y - point1.y, 2)
     );
-  };  return (
-    <div style={{ position: 'relative' }}>
-      <div style={{ 
-        position: 'absolute', 
-        top: '-120px', 
-        left: '50%', 
-        transform: 'translateX(-50%)',
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        gap: '10px'
-      }}>
-        <div style={{
-          background: 'rgba(0, 0, 0, 0.7)',
+  };
+
+  const handleVerificationComplete = async () => {
+    try {
+      setMessage('Generating face vector...');
+      const detections = await faceapi.detectAllFaces(videoRef.current, new faceapi.TinyFaceDetectorOptions())
+        .withFaceLandmarks()
+        .withFaceDescriptors();
+
+      if (!detections || detections.length === 0) {
+        throw new Error('No face detected');
+      }
+
+      setMessage('Checking for existing verification...');
+      setIsCheckingExisting(true);
+      const faceVector = generateFaceVector(detections[0]);
+      const exists = await checkExistingFaceVector(faceVector);
+      
+      if (exists) {
+        setVerificationError('This face has already been verified');
+        return;
+      }
+
+      setMessage('Storing face data in Firebase...');
+      await storeFaceVector(faceVector);
+      
+      setMessage('Verification complete! Face data stored successfully.');
+      if (onVerificationComplete) {
+        onVerificationComplete();
+      }
+    } catch (error) {
+      console.error('Verification error:', error);
+      setVerificationError(error.message);
+    } finally {
+      setIsCheckingExisting(false);
+    }
+  };
+
+  return (
+    <div className="face-detection-container" style={{ 
+      position: 'relative', 
+      width: '100%', 
+      maxWidth: '720px', 
+      height: '560px',
+      margin: '0 auto',
+      backgroundColor: '#000'
+    }}>
+      <video
+        ref={videoRef}
+        width={videoDimensions.width}
+        height={videoDimensions.height}
+        autoPlay
+        muted
+        playsInline
+        style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          width: '100%',
+          height: '100%',
+          objectFit: 'cover',
+          backgroundColor: '#000'
+        }}
+      />
+      <canvas
+        ref={canvasRef}
+        width={videoDimensions.width}
+        height={videoDimensions.height}
+        style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          width: '100%',
+          height: '100%',
+          backgroundColor: 'transparent'
+        }}
+      />
+      {verificationError && (
+        <div className="error-message" style={{
+          position: 'absolute',
+          top: '10px',
+          left: '50%',
+          transform: 'translateX(-50%)',
+          background: 'rgba(255, 0, 0, 0.8)',
+          color: 'white',
           padding: '10px 20px',
           borderRadius: '5px',
-          color: '#fff',
-          fontWeight: 'bold'
+          zIndex: 1000
         }}>
-          {message}
+          {verificationError}
         </div>
-        <div style={{
-          background: blinkStatus === 'BLINK DETECTED' ? 'rgba(0, 255, 0, 0.7)' : 'rgba(255, 255, 255, 0.7)',
-          padding: '10px 20px',
-          borderRadius: '5px',
-          color: '#000',
-          fontWeight: 'bold'
-        }}>
-          EAR: {currentEAR.toFixed(3)} | Status: {blinkStatus} | Blinks: {blinkCount}/2
-        </div>
-      </div>
+      )}
       <div style={{
         position: 'absolute',
         top: '10px',
         left: '50%',
         transform: 'translateX(-50%)',
-        zIndex: 2,
-        background: blinkCount === 2 ? '#4CAF50' : '#222',
-        color: '#fff',
-        padding: '10px 30px',
-        borderRadius: '20px',
-        fontWeight: 'bold',
-        fontSize: '1.2rem',
-        boxShadow: '0 2px 8px rgba(0,0,0,0.15)'
+        background: 'rgba(0, 0, 0, 0.7)',
+        color: 'white',
+        padding: '10px 20px',
+        borderRadius: '5px',
+        zIndex: 1000
       }}>
-        Blinks: {blinkCount}/2
+        {message}
       </div>
-      <video
-        ref={videoRef}
-        width="720"
-        height="560"
-        autoPlay
-        muted
-        onPlay={handleVideoPlay}
-      />
-      <canvas
-        ref={canvasRef}
-        style={{
-          position: 'absolute',
-          top: 0,
-          left: 0
-        }}
-      />
       <div style={{
         position: 'absolute',
-        bottom: '-40px',
+        bottom: '10px',
         left: '50%',
         transform: 'translateX(-50%)',
         display: 'flex',
-        gap: '20px'
+        gap: '20px',
+        zIndex: 1000
       }}>
-        {/* Blink counter removed for reimplementation */}
         <div style={{
           padding: '5px 15px',
           borderRadius: '15px',
-          background: headVerification.left ? '#4CAF50' : '#666',
+          background: headVerification.left ? '#4CAF50' : 'rgba(0, 0, 0, 0.7)',
           color: 'white'
         }}>
           Head Left
@@ -300,12 +393,27 @@ const FaceDetection = () => {
         <div style={{
           padding: '5px 15px',
           borderRadius: '15px',
-          background: headVerification.right ? '#4CAF50' : '#666',
+          background: headVerification.right ? '#4CAF50' : 'rgba(0, 0, 0, 0.7)',
           color: 'white'
         }}>
           Head Right
         </div>
       </div>
+      {isCheckingExisting && (
+        <div style={{
+          position: 'absolute',
+          top: '50%',
+          left: '50%',
+          transform: 'translate(-50%, -50%)',
+          background: 'rgba(0, 0, 0, 0.8)',
+          color: 'white',
+          padding: '20px',
+          borderRadius: '10px',
+          zIndex: 1000
+        }}>
+          {message}
+        </div>
+      )}
     </div>
   );
 };
