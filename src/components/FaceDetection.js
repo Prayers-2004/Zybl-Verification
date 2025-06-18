@@ -306,114 +306,55 @@ const FaceDetection = ({ walletAddress, onVerificationComplete }) => {
     }
   };
 
+  // Helper for progress bar
+  const getProgress = () => {
+    if (!headVerification.left && !headVerification.right) return 0.33;
+    if (headVerification.left && !headVerification.right) return 0.66;
+    if (headVerification.left && headVerification.right) return 1;
+    return 0;
+  };
+
   return (
-    <div className="face-detection-container" style={{ 
-      position: 'relative', 
-      width: '100%', 
-      maxWidth: '720px', 
-      height: '560px',
-      margin: '0 auto',
-      backgroundColor: '#000'
-    }}>
-      <video
-        ref={videoRef}
-        width={videoDimensions.width}
-        height={videoDimensions.height}
-        autoPlay
-        muted
-        playsInline
-        style={{
-          position: 'absolute',
-          top: 0,
-          left: 0,
-          width: '100%',
-          height: '100%',
-          objectFit: 'cover',
-          backgroundColor: '#000'
-        }}
-      />
-      <canvas
-        ref={canvasRef}
-        width={videoDimensions.width}
-        height={videoDimensions.height}
-        style={{
-          position: 'absolute',
-          top: 0,
-          left: 0,
-          width: '100%',
-          height: '100%',
-          backgroundColor: 'transparent'
-        }}
-      />
-      {verificationError && (
-        <div className="error-message" style={{
-          position: 'absolute',
-          top: '10px',
-          left: '50%',
-          transform: 'translateX(-50%)',
-          background: 'rgba(255, 0, 0, 0.8)',
-          color: 'white',
-          padding: '10px 20px',
-          borderRadius: '5px',
-          zIndex: 1000
-        }}>
-          {verificationError}
-        </div>
-      )}
-      <div style={{
-        position: 'absolute',
-        top: '10px',
-        left: '50%',
-        transform: 'translateX(-50%)',
-        background: 'rgba(0, 0, 0, 0.7)',
-        color: 'white',
-        padding: '10px 20px',
-        borderRadius: '5px',
-        zIndex: 1000
-      }}>
-        {message}
-      </div>
-      <div style={{
-        position: 'absolute',
-        bottom: '10px',
-        left: '50%',
-        transform: 'translateX(-50%)',
-        display: 'flex',
-        gap: '20px',
-        zIndex: 1000
-      }}>
-        <div style={{
-          padding: '5px 15px',
-          borderRadius: '15px',
-          background: headVerification.left ? '#4CAF50' : 'rgba(0, 0, 0, 0.7)',
-          color: 'white'
-        }}>
-          Head Left
-        </div>
-        <div style={{
-          padding: '5px 15px',
-          borderRadius: '15px',
-          background: headVerification.right ? '#4CAF50' : 'rgba(0, 0, 0, 0.7)',
-          color: 'white'
-        }}>
-          Head Right
+    <div className="face-detection-outer">
+      {/* Status/Error/Progress above video */}
+      <div className="face-info-top">
+        {/* Only show status if there is no error */}
+        {!verificationError && message && <div className="status-overlay">{message}</div>}
+        {verificationError && <div className="error-message">{verificationError}</div>}
+        <div className="progress-bar">
+          <div className="progress-bar-inner" style={{ width: `${getProgress() * 100}%` }} />
         </div>
       </div>
-      {isCheckingExisting && (
-        <div style={{
-          position: 'absolute',
-          top: '50%',
-          left: '50%',
-          transform: 'translate(-50%, -50%)',
-          background: 'rgba(0, 0, 0, 0.8)',
-          color: 'white',
-          padding: '20px',
-          borderRadius: '10px',
-          zIndex: 1000
-        }}>
-          {message}
+
+      {/* Video/Canvas area only */}
+      <div className="face-canvas-area">
+        <video
+          ref={videoRef}
+          width={videoDimensions.width}
+          height={videoDimensions.height}
+          autoPlay
+          muted
+          playsInline
+          className="face-video"
+        />
+        <canvas
+          ref={canvasRef}
+          width={videoDimensions.width}
+          height={videoDimensions.height}
+          className="face-canvas"
+        />
+      </div>
+
+      {/* Info/Controls below video */}
+      <div className="face-info-bottom">
+        <div className="debug-info">
+          {`Current Tilt: ${currentHeadTilt.toFixed(3)}\nLeft Verified: ${headVerification.left}\nRight Verified: ${headVerification.right}\nCurrent EAR: ${currentEAR.toFixed(3)} (Threshold: 0.290)\nStatus: ${blinkStatus}\n${debugInfo}`}
         </div>
-      )}
+        <div className="head-indicators">
+          <div className={`head-badge${headVerification.left ? ' active' : ''}`}>Head Left</div>
+          <div className={`head-badge${headVerification.right ? ' active' : ''}`}>Head Right</div>
+        </div>
+      </div>
     </div>
   );
 };
