@@ -125,11 +125,12 @@ export const storeFaceVector = async (faceVector) => {
     const faceVectorsRef = collection(db, 'faceVectors');
     const timestamp = new Date().toISOString();
     
-    await addDoc(faceVectorsRef, {
+    const docRef = await addDoc(faceVectorsRef, {
       vector: faceVector,
       timestamp: timestamp
     });
 
+    console.log('Successfully stored face vector with ID:', docRef.id);
     return true;
   } catch (error) {
     console.error('Error storing face vector:', error);
@@ -152,10 +153,17 @@ export const checkExistingFaceVector = async (faceVector) => {
 
     console.log('Checking for existing face vector...');
     const faceVectorsRef = collection(db, 'faceVectors');
+    
+    // We're not filtering by wallet address in this implementation
+    // since the Firebase where function isn't imported
     const q = query(faceVectorsRef);
     const querySnapshot = await getDocs(q);
     
     console.log('Found', querySnapshot.docs.length, 'existing vectors');
+    
+    // Return the most similar face found
+    let highestSimilarity = 0;
+    let bestMatch = null;
     
     for (const doc of querySnapshot.docs) {
       const storedData = doc.data();
@@ -170,9 +178,15 @@ export const checkExistingFaceVector = async (faceVector) => {
         const similarity = calculateSimilarity(faceVector, storedVector);
         console.log('Vector similarity:', similarity);
         
-        // If similarity is above threshold, consider it a match
-        if (similarity > 0.6) {
-          return true;
+        // Track the highest similarity found
+        if (similarity > highestSimilarity) {
+          highestSimilarity = similarity;
+          bestMatch = {
+            id: doc.id,
+            similarity,
+            walletAddress: storedData.walletAddress,
+            timestamp: storedData.timestamp
+          };
         }
       } catch (error) {
         console.warn('Error comparing vectors:', error);
@@ -180,9 +194,46 @@ export const checkExistingFaceVector = async (faceVector) => {
       }
     }
     
+    // If we found a match above threshold, return it
+    // 0.8 is a good threshold for face recognition (same person)
+    if (highestSimilarity > 0.8) {
+      console.log('Face match found with similarity:', highestSimilarity);
+      return bestMatch;
+    }
+    
     return false;
   } catch (error) {
     console.error('Error checking existing face vector:', error);
     return false; // Don't throw, just return false
   }
-}; 
+};
+
+// Function to store face vector in Firebase with wallet address
+export const storeFaceVectorWithWallet = async (faceVector, walletAddress) => {
+  // Check if Firebase is available
+  if (!db || !collection || !addDoc) {
+    console.warn('Firebase is not available, skipping face vector storage');
+    return false;
+  }
+  
+  try {
+    if (!Array.isArray(faceVector)) {
+      throw new Error('Invalid face vector format');
+    }
+
+    const faceVectorsRef = collection(db, 'faceVectors');
+    const timestamp = new Date().toISOString();
+    
+    const docRef = await addDoc(faceVectorsRef, {
+      vector: faceVector,
+      timestamp: timestamp,
+      walletAddress: walletAddress || 'unknown'
+    });
+
+    console.log('Successfully stored face vector with wallet address:', walletAddress, 'ID:', docRef.id);
+    return true;
+  } catch (error) {
+    console.error('Error storing face vector with wallet:', error);
+    return false;
+  }
+};

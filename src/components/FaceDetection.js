@@ -1,6 +1,11 @@
 import React, { useEffect, useRef, useState } from 'react';
 import * as faceapi from 'face-api.js';
-import { generateFaceVector, storeFaceVector, checkExistingFaceVector } from '../utils/faceVerification';
+import { 
+  generateFaceVector, 
+  storeFaceVector, 
+  storeFaceVectorWithWallet, 
+  checkExistingFaceVector 
+} from '../utils/faceVerification';
 
 const FaceDetection = ({ walletAddress, onVerificationComplete }) => {
   const videoRef = useRef();
@@ -290,21 +295,28 @@ const FaceDetection = ({ walletAddress, onVerificationComplete }) => {
       
       const faceVector = generateFaceVector(detections[0]);
       
-      try {
-        const exists = await checkExistingFaceVector(faceVector);
-        
-        if (exists) {
-          setVerificationError('This face has already been verified');
-          return;
-        }
-      } catch (error) {
-        console.warn('Face vector check failed:', error);
-        // Continue with verification even if check fails
+      // Check if this face already exists in the database
+      const existingFace = await checkExistingFaceVector(faceVector);
+      
+      if (existingFace) {
+        // This face has already been verified before
+        setMessage('This face has already been verified.');
+        setVerificationError('This face has already been verified in our system.');
+        return;
       }
-
+      
       setMessage('Storing face data...');
       try {
-        const stored = await storeFaceVector(faceVector);
+        let stored = false;
+        
+        // If we have a wallet address, store with it
+        if (walletAddress) {
+          stored = await storeFaceVectorWithWallet(faceVector, walletAddress);
+        } else {
+          // Fallback to regular storage
+          stored = await storeFaceVector(faceVector);
+        }
+        
         if (!stored) {
           console.warn('Face vector storage skipped (Firebase might not be available)');
         }
