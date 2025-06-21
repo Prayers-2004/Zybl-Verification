@@ -1,12 +1,34 @@
 // eslint-disable-next-line no-unused-vars
 import * as faceapi from 'face-api.js';
-import { initializeApp } from 'firebase/app';
-import { getFirestore, collection, addDoc, getDocs, query } from 'firebase/firestore';
-import { firebaseConfig } from '../config/firebase.config';
 
-// Initialize Firebase
-const app = initializeApp(firebaseConfig);
-const db = getFirestore(app);
+// Import Firebase modules safely
+let firebase = null;
+let app = null;
+let db = null;
+let collection = null;
+let addDoc = null;
+let query = null;
+let getDocs = null;
+
+try {
+  // Dynamic imports for Firebase
+  firebase = require('firebase/app');
+  const firestoreModule = require('firebase/firestore');
+  const { firebaseConfig } = require('../config/firebase.config');
+  
+  // Initialize Firebase
+  app = firebase.initializeApp(firebaseConfig);
+  db = firestoreModule.getFirestore(app);
+  collection = firestoreModule.collection;
+  addDoc = firestoreModule.addDoc;
+  query = firestoreModule.query;
+  getDocs = firestoreModule.getDocs;
+  console.log('Firebase initialized successfully');
+} catch (error) {
+  console.warn('Firebase initialization skipped:', error.message);
+  
+  // Keep all variables null
+}
 
 // Function to generate face vector from detection data
 export const generateFaceVector = (detection) => {
@@ -89,6 +111,12 @@ export const calculateSimilarity = (vector1, vector2) => {
 
 // Function to store face vector in Firebase
 export const storeFaceVector = async (faceVector) => {
+  // Check if Firebase is available
+  if (!db || !collection || !addDoc) {
+    console.warn('Firebase is not available, skipping face vector storage');
+    return false;
+  }
+  
   try {
     if (!Array.isArray(faceVector)) {
       throw new Error('Invalid face vector format');
@@ -105,12 +133,18 @@ export const storeFaceVector = async (faceVector) => {
     return true;
   } catch (error) {
     console.error('Error storing face vector:', error);
-    throw new Error('Failed to store face vector');
+    return false; // Don't throw, just return false
   }
 };
 
 // Function to check for existing face vectors
 export const checkExistingFaceVector = async (faceVector) => {
+  // Check if Firebase is available
+  if (!db || !collection || !query || !getDocs) {
+    console.warn('Firebase is not available, skipping face vector check');
+    return false;
+  }
+  
   try {
     if (!Array.isArray(faceVector)) {
       throw new Error('Invalid face vector format');
@@ -149,6 +183,6 @@ export const checkExistingFaceVector = async (faceVector) => {
     return false;
   } catch (error) {
     console.error('Error checking existing face vector:', error);
-    throw new Error('Failed to check existing face vector');
+    return false; // Don't throw, just return false
   }
 }; 
