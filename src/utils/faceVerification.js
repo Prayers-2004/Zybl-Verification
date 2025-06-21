@@ -1,7 +1,8 @@
+// eslint-disable-next-line no-unused-vars
 import * as faceapi from 'face-api.js';
 import { initializeApp } from 'firebase/app';
-import { getFirestore, collection, addDoc, getDocs, query, where } from 'firebase/firestore';
-import { firebaseConfig, ENCRYPTION_KEY } from '../config/firebase.config';
+import { getFirestore, collection, addDoc, getDocs, query } from 'firebase/firestore';
+import { firebaseConfig } from '../config/firebase.config';
 
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);

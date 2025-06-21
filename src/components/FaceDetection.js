@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import * as faceapi from 'face-api.js';
-import { generateFaceVector, encryptFaceVector, storeFaceVector, checkExistingFaceVector } from '../utils/faceVerification';
+import { generateFaceVector, storeFaceVector, checkExistingFaceVector } from '../utils/faceVerification';
 
 const FaceDetection = ({ walletAddress, onVerificationComplete }) => {
   const videoRef = useRef();
@@ -24,10 +24,12 @@ const FaceDetection = ({ walletAddress, onVerificationComplete }) => {
   const [debugInfo, setDebugInfo] = useState('');
   const blinkCooldown = 1000;
   const blinkDoneRef = useRef(false);
+  // eslint-disable-next-line no-unused-vars
   const [isCheckingExisting, setIsCheckingExisting] = useState(false);
   const [verificationError, setVerificationError] = useState(null);
   const detectionIntervalRef = useRef(null);
-  const [videoDimensions, setVideoDimensions] = useState({ width: 720, height: 560 });
+  // eslint-disable-next-line no-unused-vars
+  const [videoDimensions] = useState({ width: 720, height: 560 });
 
   // Load models and start video
   useEffect(() => {
@@ -52,6 +54,7 @@ const FaceDetection = ({ walletAddress, onVerificationComplete }) => {
         clearInterval(detectionIntervalRef.current);
       }
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Handle video stream
@@ -245,6 +248,7 @@ const FaceDetection = ({ walletAddress, onVerificationComplete }) => {
       video.removeEventListener('play', handleVideoPlay);
       video.removeEventListener('loadedmetadata', () => {});
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentEAR, blinkStatus, eyesClosed, lastBlinkTime, blinkCount, verificationComplete, debugInfo, message, videoDimensions]);
 
   const calculateEAR = (eye) => {
