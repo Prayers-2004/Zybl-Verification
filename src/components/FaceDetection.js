@@ -300,8 +300,12 @@ const FaceDetection = ({ walletAddress, onVerificationComplete }) => {
       
       if (existingFace) {
         // This face has already been verified before
-        setMessage('This face has already been verified.');
-        setVerificationError('This face has already been verified in our system.');
+        const similarityPercent = Math.round(existingFace.similarity * 100);
+        const message = `This face has already been verified (${similarityPercent}% match).`;
+        console.log('Existing face details:', existingFace);
+        
+        setMessage(message);
+        setVerificationError(message);
         return;
       }
       

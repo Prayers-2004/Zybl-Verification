@@ -75,19 +75,26 @@ export const calculateSimilarity = (vector1, vector2) => {
       throw new Error('Vectors must be of same length');
     }
 
+    // Pre-process vectors to ensure they're normalized
+    const processedVector1 = vector1.map(val => Number(val));
+    const processedVector2 = vector2.map(val => Number(val));
+    
+    // Check for invalid values
+    const hasInvalidValues = [...processedVector1, ...processedVector2].some(val => isNaN(val));
+    if (hasInvalidValues) {
+      console.error('Invalid vector values detected');
+      throw new Error('Invalid vector values');
+    }
+
+    // Calculate cosine similarity
     let dotProduct = 0;
     let norm1 = 0;
     let norm2 = 0;
 
-    for (let i = 0; i < vector1.length; i++) {
-      const v1 = Number(vector1[i]);
-      const v2 = Number(vector2[i]);
+    for (let i = 0; i < processedVector1.length; i++) {
+      const v1 = processedVector1[i];
+      const v2 = processedVector2[i];
       
-      if (isNaN(v1) || isNaN(v2)) {
-        console.error('Invalid vector values at index', i, { v1, v2 });
-        throw new Error('Invalid vector values');
-      }
-
       dotProduct += v1 * v2;
       norm1 += v1 * v1;
       norm2 += v2 * v2;
@@ -102,7 +109,8 @@ export const calculateSimilarity = (vector1, vector2) => {
     }
 
     const similarity = dotProduct / (norm1 * norm2);
-    return similarity;
+    // Ensure the similarity is within the valid range [0, 1]
+    return Math.max(0, Math.min(1, similarity));
   } catch (error) {
     console.error('Error in calculateSimilarity:', error);
     throw error;
@@ -165,6 +173,9 @@ export const checkExistingFaceVector = async (faceVector) => {
     let highestSimilarity = 0;
     let bestMatch = null;
     
+    // Keep track of all faces with similarity > 0.7 for debugging
+    const similarFaces = [];
+    
     for (const doc of querySnapshot.docs) {
       const storedData = doc.data();
       const storedVector = storedData.vector;
@@ -176,7 +187,15 @@ export const checkExistingFaceVector = async (faceVector) => {
 
       try {
         const similarity = calculateSimilarity(faceVector, storedVector);
-        console.log('Vector similarity:', similarity);
+        
+        // Track faces with significant similarity for debugging
+        if (similarity > 0.7) {
+          similarFaces.push({
+            id: doc.id, 
+            similarity, 
+            walletAddress: storedData.walletAddress
+          });
+        }
         
         // Track the highest similarity found
         if (similarity > highestSimilarity) {
@@ -194,11 +213,24 @@ export const checkExistingFaceVector = async (faceVector) => {
       }
     }
     
+    // Log all similar faces for debugging
+    if (similarFaces.length > 0) {
+      console.log('Similar faces found:');
+      similarFaces.sort((a, b) => b.similarity - a.similarity);
+      similarFaces.forEach(face => {
+        console.log(`ID: ${face.id}, Similarity: ${face.similarity.toFixed(4)}, Wallet: ${face.walletAddress || 'none'}`);
+      });
+    }
+    
     // If we found a match above threshold, return it
-    // 0.8 is a good threshold for face recognition (same person)
-    if (highestSimilarity > 0.8) {
-      console.log('Face match found with similarity:', highestSimilarity);
+    // 0.9 is a more strict threshold for face recognition (same person)
+    // This higher threshold helps distinguish different people more accurately
+    if (highestSimilarity > 0.9) {
+      console.log('Face match found with similarity:', highestSimilarity.toFixed(4));
       return bestMatch;
+    } else if (highestSimilarity > 0.75) {
+      // For debugging: log close matches that didn't meet our threshold
+      console.log('Near match found but below threshold:', highestSimilarity.toFixed(4));
     }
     
     return false;
